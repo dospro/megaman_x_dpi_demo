@@ -2,8 +2,7 @@
 #include <fstream>
 #include "DPI/cDPIGame.h"
 #include "DPI/SpritesBatch.h"
-#include "DPI/cDPIVector2D.h"
-#include "DPI/json.hpp"
+#include <nlohmann//json.hpp>
 
 const float ASPECT_RATIO = 4.0 / 3.0;
 
@@ -21,66 +20,6 @@ double min(double a, double b)
     if (a <= b) return a;
     else return b;
 }
-
-
-struct Entity
-{
-    int textureId;
-    DPI::cVector2D size;
-};
-
-enum class ScrollType
-{
-    None,
-    HorizontalScroll,
-    VerticallScroll,
-    FreeScroll,
-};
-
-struct Texture
-{
-    int textureId;
-    int IW, IH;
-    int IRW, IRH;
-    int posX, posY;
-//    DPI::cRect bounds;
-//    DPI::cRect ratioHBounds;
-};
-
-struct Layer
-{
-    std::vector<Texture> textures;
-};
-
-struct Background
-{
-    ScrollType scrollType;
-    std::vector<Layer> layers;
-};
-
-
-struct Position
-{
-    int posX;
-    int posY;
-};
-enum class CameraLockType
-{
-    XLocked,
-    YLocked,
-};
-
-class Camera
-{
-public:
-    long int xPosition;
-    long int yPosition;
-private:
-    int width;
-    int height;
-    CameraLockType lockType;
-};
-
 
 /****
  * ECS_
@@ -123,9 +62,8 @@ public:
 private:
     bool mRightKeyPressed;
     bool mLeftKeyPressed;
-    Position mCamera;
-    Background mBackground;
-    DPI::cTextureManager *mTextureManager;
+    std::unique_ptr<DPI::cTextureManager> mTextureManager;
+    std::unique_ptr<DPI::cSpriteBatcher> mSpriteBatcher;
     DPI::SpritesBatch mBatch;
 
     World world;
@@ -135,32 +73,14 @@ private:
 
     void moveCameraLeft(int deltaTime);
     void moveCameraRight(int deltaTime);
-    Layer loadLayers();
-    void drawBackGround();
-    DPI::cTextureRegion getTextureRegionFromCamera(Position camera, Texture texture);
-    DPI::cTextureRegion getLeftTextureRegionFromCamera(Position camera, Texture texture);
-    DPI::cTextureRegion getRightTextureRegionFromCamera(Position camera, Texture texture);
 };
-
-//MegamanXGame::MegamanXGame() : cGame("./libs/", SCREEN_WIDTH, SCREEN_HEIGHT)
-//{
-//    this->getInput()->addListener(this);
-//    mTextureManager = getGraphics()->mTextureManager;
-//    mBackground.scrollType = ScrollType::HorizontalScroll;
-//
-//    mBackground.layers.push_back(loadLayers());
-//    mTextureManager->setCurrentTexture(mBackground.layers[0].textures[0].textureId);
-//
-//    mCamera = Position{0, 0};
-//    mRightKeyPressed = false;
-//    mLeftKeyPressed = false;
-//}
 
 MegamanXGame::MegamanXGame() : cGame("./libs/", SCREEN_WIDTH, SCREEN_HEIGHT)
 {
     // First lets configure our input listener
     this->getInput()->addListener(this);
-    mTextureManager = getGraphics()->mTextureManager;
+    mTextureManager = getGraphics()->getTextureManager();
+    mSpriteBatcher = getGraphics()->getSpriteBatcher();
 
     // Lets load the level json file
     std::ifstream f("./assets/level1.json");
@@ -201,14 +121,6 @@ MegamanXGame::MegamanXGame() : cGame("./libs/", SCREEN_WIDTH, SCREEN_HEIGHT)
     mLeftKeyPressed = false;
 }
 
-
-//MegamanXGame::~MegamanXGame()
-//{
-//    for (auto texture : mBackground.layers[0].textures) {
-//        mTextureManager->releaseTexture(texture.textureId);
-//    }
-//}
-
 MegamanXGame::~MegamanXGame()
 {
     for (const auto &bg: backgrounds) {
@@ -228,15 +140,8 @@ void MegamanXGame::update(int deltaTime)
     cGame::update(deltaTime);
 }
 
-//void MegamanXGame::show()
-//{
-//    drawBackGround();
-//    cGame::show();
-//}
-
 void MegamanXGame::show()
 {
-
     // We need to calculate based on the camera position what part of the world we are showing.
 
     // Draw backgrounds
@@ -279,8 +184,8 @@ void MegamanXGame::show()
                 mTextureManager->setCurrentTexture(texture.textureId);
 
                 // TODO: Sprite batcher cannot draw from different textures in a single flush
-                getGraphics()->mSpriteBatcher->drawSprite(dest, source);
-                getGraphics()->mSpriteBatcher->flush();
+                mSpriteBatcher->drawSprite(dest, source);
+                mSpriteBatcher->flush();
             }
         }
     }
@@ -317,125 +222,6 @@ void MegamanXGame::moveCameraRight(int deltaTime)
 }
 
 
-void MegamanXGame::drawBackGround()
-{
-    auto dst = DPI::cRect{
-            0,
-            0,
-            800,
-            600
-    };
-
-    Texture tex1 = mBackground.layers[0].textures[0];
-    Texture tex2 = mBackground.layers[0].textures[1];
-    Texture tex3 = mBackground.layers[0].textures[2];
-    int CX2 = static_cast<int>(mCamera.posX) + SCREEN_WIDTH;
-
-    if (CX2 <= tex1.IRW) {
-        auto src = getTextureRegionFromCamera(mCamera, tex1);
-        getGraphics()->mTextureManager->setCurrentTexture(tex1.textureId);
-        mBatch.addSprite(dst, src);
-        getGraphics()->mSpriteBatcher->drawSprite(dst, src);
-    } else if (mCamera.posX <= tex1.IRW && CX2 > tex2.posX) {
-        auto cut = static_cast<float>(tex1.IRW - mCamera.posX);
-        auto dst_p1 = DPI::cRect{
-                0,
-                0,
-                cut,
-                SCREEN_HEIGHT,
-        };
-        auto dst_p2 = DPI::cRect{
-                cut,
-                0,
-                SCREEN_WIDTH - cut,
-                SCREEN_HEIGHT,
-        };
-        auto src_1 = getLeftTextureRegionFromCamera(mCamera, tex1);
-        auto src_2 = getRightTextureRegionFromCamera(mCamera, tex2);
-
-        getGraphics()->mTextureManager->setCurrentTexture(tex1.textureId);
-        getGraphics()->mSpriteBatcher->drawSprite(dst_p1, src_1);
-        getGraphics()->mTextureManager->setCurrentTexture(tex2.textureId);
-        getGraphics()->mSpriteBatcher->drawSprite(dst_p2, src_2);
-
-    } else if (mCamera.posX >= tex2.posX && CX2 < tex2.posX + tex2.IRW) {
-        float x1 = static_cast<float>(mCamera.posX - tex2.posX) / static_cast<float>(tex2.IRW);
-        float x2 = static_cast<float>(CX2 - tex2.posX) / static_cast<float>(tex2.IRW);
-        auto src = DPI::cTextureRegion{
-                x1,
-                0.0,
-                x2,
-                1.0
-        };
-        getGraphics()->mTextureManager->setCurrentTexture(tex2.textureId);
-        getGraphics()->mSpriteBatcher->drawSprite(dst, src);
-    } else if (mCamera.posX < tex2.posX + tex2.IRW && CX2 >= tex3.posX) {
-        auto cut = static_cast<float>(tex2.posX + tex2.IRW - mCamera.posX);
-        auto dst_p1 = DPI::cRect{0, 0, cut, SCREEN_HEIGHT,};
-        auto dst_p2 = DPI::cRect{cut, 0, SCREEN_WIDTH - cut, SCREEN_HEIGHT,};
-
-        auto src_1 = getLeftTextureRegionFromCamera(mCamera, tex2);
-        auto src_2 = getRightTextureRegionFromCamera(mCamera, tex3);
-
-        getGraphics()->mTextureManager->setCurrentTexture(tex2.textureId);
-        getGraphics()->mSpriteBatcher->drawSprite(dst_p1, src_1);
-        getGraphics()->mSpriteBatcher->flush();
-        getGraphics()->mTextureManager->setCurrentTexture(tex3.textureId);
-        getGraphics()->mSpriteBatcher->drawSprite(dst_p2, src_2);
-    } else if (mCamera.posX >= tex3.posX) {
-        auto src = getTextureRegionFromCamera(mCamera, tex3);
-        getGraphics()->mTextureManager->setCurrentTexture(tex3.textureId);
-        getGraphics()->mSpriteBatcher->drawSprite(dst, src);
-    }
-
-    getGraphics()->mSpriteBatcher->flush();
-}
-
-DPI::cTextureRegion MegamanXGame::getTextureRegionFromCamera(Position camera, Texture texture)
-{
-    int CX2 = camera.posX + SCREEN_WIDTH;
-    float x1 = static_cast<float>(camera.posX - texture.posX) / static_cast<float>(texture.IRW);
-    float x2 = static_cast<float>(CX2 - texture.posX) / static_cast<float>(texture.IRW);
-    return DPI::cTextureRegion{
-            x1,
-            0.0,
-            x2,
-            1.0
-    };
-}
-
-DPI::cTextureRegion MegamanXGame::getLeftTextureRegionFromCamera(Position camera, Texture texture)
-{
-    float xa1 = static_cast<float>(camera.posX - texture.posX) / static_cast<float>(texture.IRW);
-    float xa2 = 1.0f;
-
-    auto p1 = DPI::cTextureRegion{
-            xa1,
-            0.0,
-            xa2,
-            1.0
-    };
-
-    return p1;
-}
-
-DPI::cTextureRegion MegamanXGame::getRightTextureRegionFromCamera(Position camera, Texture texture)
-{
-    int CX2 = camera.posX + SCREEN_WIDTH;
-    float xb1 = 0.0f;
-    float xb2 = static_cast<float>(CX2 - texture.posX) / static_cast<float>(texture.IRW);
-
-    auto p2 = DPI::cTextureRegion{
-            xb1,
-            0.0,
-            xb2,
-            1.0,
-    };
-
-    return p2;
-}
-
-
 void MegamanXGame::onKeyUp(int key)
 {
     switch (key) {
@@ -465,34 +251,6 @@ void MegamanXGame::onKeyDown(int key)
         default:
             break;
     }
-}
-
-
-Layer MegamanXGame::loadLayers()
-{
-    std::string textureFiles[] = {"./assets/bg_1.png", "./assets/bg_1.png", "./assets/bg_2.png"};
-    Layer layer;
-    layer.textures.push_back(Texture{
-            mTextureManager->getIdFromTexture(textureFiles[0]),
-            513, 257,
-            513 * SCREEN_HEIGHT / 257, SCREEN_HEIGHT,
-            0, 0,
-    });
-
-    layer.textures.push_back(Texture{
-            mTextureManager->getIdFromTexture(textureFiles[1]),
-            513, 257,
-            513 * SCREEN_HEIGHT / 257, SCREEN_HEIGHT,
-            513 * SCREEN_HEIGHT / 257, 0
-    });
-
-    layer.textures.push_back(Texture{
-            mTextureManager->getIdFromTexture(textureFiles[2]),
-            3073, 256,
-            3073 * SCREEN_HEIGHT / 256, SCREEN_HEIGHT,
-            2 * 513 * SCREEN_HEIGHT / 257, 0
-    });
-    return layer;
 }
 
 
